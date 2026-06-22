@@ -1,0 +1,10 @@
+# Build artifacts
+*.exe
+*.o
+*.obj
+
+# IDE
+.vs/
+.vscode/
+*.suo
+*.user

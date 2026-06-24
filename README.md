@@ -27,7 +27,9 @@
 │   ├── semaphore.h           # 信号量头文件
 │   ├── semaphore.cpp         # 信号量实现（PV 操作）
 │   ├── message_queue.h       # 消息队列头文件
-│   └── message_queue.cpp     # 消息队列实现
+│   ├── message_queue.cpp     # 消息队列实现
+│   ├── cli_renderer.h        # CLI 渲染器头文件
+│   └── cli_renderer.cpp      # CLI 渲染器实现（颜色、动画、进度条）
 ├── data/
 │   ├── 进程管理模拟系统.docx   # 课程设计任务书
 │   └── 课程设计安排.pptx       # 课程安排
@@ -45,7 +47,7 @@
 ### 编译
 
 ```bash
-C:\msys64\mingw64\bin\g++.exe -std=c++17 -static -o process_sim.exe src\main.cpp src\process_manager.cpp src\scheduler.cpp src\semaphore.cpp src\message_queue.cpp
+C:\msys64\mingw64\bin\g++.exe -std=c++17 -static -o process_sim.exe src\main.cpp src\process_manager.cpp src\scheduler.cpp src\semaphore.cpp src\message_queue.cpp src\cli_renderer.cpp
 ```
 
 ### 运行

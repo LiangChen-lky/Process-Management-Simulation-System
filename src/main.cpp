@@ -7,12 +7,10 @@
 #include "scheduler.h"
 #include "semaphore.h"
 #include "message_queue.h"
-
-#ifdef _WIN32
-#include <windows.h>
-#endif
+#include "cli_renderer.h"
 
 using namespace std;
+using namespace cli;
 
 ProcessManager pm;
 Scheduler scheduler(pm);
@@ -23,135 +21,161 @@ void clear_input() {
     cin.ignore(numeric_limits<streamsize>::max(), '\n');
 }
 
-int read_int(const string& prompt) {
+// TUI 风格的输入函数
+int read_int_tui(const string& prompt) {
     int val;
     while (true) {
-        cout << prompt;
-        if (cin >> val) { clear_input(); return val; }
-        cout << "  输入无效，请重试。" << endl;
+        set_cursor(INPUT_ROW, 1);
+        cout << color::CYAN << "  " << prompt << color::RESET << flush;
+        if (cin >> val) {
+            clear_input();
+            // 清空输入行
+            set_cursor(INPUT_ROW, 1);
+            cout << string(60, ' ') << flush;
+            return val;
+        }
+        out_error("输入无效，请重试。");
         clear_input();
     }
 }
 
-string read_str(const string& prompt) {
+string read_str_tui(const string& prompt) {
     string val;
-    cout << prompt;
+    set_cursor(INPUT_ROW, 1);
+    cout << color::CYAN << "  " << prompt << color::RESET << flush;
     getline(cin, val);
+    // 清空输入行
+    set_cursor(INPUT_ROW, 1);
+    cout << string(60, ' ') << flush;
     return val;
+}
+
+// 等待用户按回车
+void wait_for_enter() {
+    set_cursor(INPUT_ROW, 1);
+    cout << color::GRAY << "  [按回车继续...]" << color::RESET << flush;
+    cin.get();
+    // 清空输入行
+    set_cursor(INPUT_ROW, 1);
+    cout << string(60, ' ') << flush;
 }
 
 void display_processes() {
     auto procs = pm.get_all_processes();
-    if (procs.empty()) {
-        cout << "\n  当前没有进程。\n" << endl;
-        return;
-    }
-    cout << "\n+------+----------+------+----------+--------+--------+--------+" << endl;
-    cout << "| PID  | 名称     | 状态 | 总时间   | 剩余   | 创建   | 完成   |" << endl;
-    cout << "+------+----------+------+----------+--------+--------+--------+" << endl;
-    for (auto* p : procs) {
-        cout << "| " << setw(4) << p->pid << " "
-             << "| " << setw(8) << left << p->name << right
-             << "| " << setw(4) << p->state_str()
-             << "| " << setw(8) << p->total_time
-             << "| " << setw(6) << p->remaining_time
-             << "| " << setw(6) << p->create_time
-             << "| " << setw(6) << (p->finish_time >= 0 ? to_string(p->finish_time) : "-")
-             << " |" << endl;
-    }
-    cout << "+------+----------+------+----------+--------+--------+--------+\n" << endl;
+    out_process_table(procs);
 }
 
 void display_ready_queue() {
     auto ready = pm.get_ready_queue();
-    cout << "\n  就绪队列: ";
-    if (ready.empty()) { cout << "(空)"; }
-    else {
-        for (auto* p : ready) cout << p->name << "(P" << p->pid << ") ";
-    }
-    cout << endl;
+    out_queue("就绪队列", ready, color::GREEN);
 }
 
 void display_blocked_queue() {
     auto blocked = pm.get_blocked_queue();
-    cout << "  阻塞队列: ";
-    if (blocked.empty()) { cout << "(空)"; }
-    else {
-        for (auto* p : blocked)
-            cout << p->name << "(P" << p->pid << ":" << p->blocked_reason << ") ";
-    }
-    cout << endl;
+    out_queue("阻塞队列", blocked, color::RED);
+}
+
+void update_time_display() {
+    // 行6列15是时间值的起始位置，先清除旧值再写入新值
+    set_cursor(6, 15);
+    cout << "      " << flush;  // 清除旧值
+    set_cursor(6, 15);
+    cout << color::CYAN << pm.get_current_time() << color::RESET << flush;
 }
 
 void do_create_process() {
-    string name = read_str("  进程名称: ");
-    int time = read_int("  所需运行时间: ");
+    clear_output_area();
+    out_info("创建新进程");
+    string name = read_str_tui("进程名称: ");
+    int time = read_int_tui("所需运行时间: ");
     PCB* p = pm.create_process(name, time);
-    cout << "  -> 进程 " << p->name << "(PID=" << p->pid << ") 创建成功，状态: 就绪" << endl;
+    out_success("进程 " + p->name + "(PID=" + to_string(p->pid) + ") 创建成功");
+    display_ready_queue();
+    update_time_display();
+    wait_for_enter();
 }
 
 void do_terminate_process() {
-    int pid = read_int("  输入要终止的进程PID: ");
+    clear_output_area();
+    int pid = read_int_tui("输入要终止的进程PID: ");
     PCB* p = pm.get_process(pid);
-    if (!p) { cout << "  进程不存在。" << endl; return; }
+    if (!p) { out_error("进程不存在。"); wait_for_enter(); return; }
     if (pm.terminate_process(pid)) {
-        cout << "  -> 进程 " << p->name << "(PID=" << pid << ") 已终止。" << endl;
+        out_success("进程 " + p->name + "(PID=" + to_string(pid) + ") 已终止。");
     } else {
-        cout << "  终止失败。" << endl;
+        out_error("终止失败。");
     }
+    update_time_display();
+    wait_for_enter();
 }
 
 void do_block_process() {
-    int pid = read_int("  输入要阻塞的进程PID: ");
+    clear_output_area();
+    int pid = read_int_tui("输入要阻塞的进程PID: ");
     PCB* p = pm.get_process(pid);
-    if (!p) { cout << "  进程不存在。" << endl; return; }
+    if (!p) { out_error("进程不存在。"); wait_for_enter(); return; }
     if (p->state != RUNNING) {
-        cout << "  只能阻塞运行中的进程。当前状态: " << p->state_str() << endl;
+        out_warning("只能阻塞运行中的进程。当前状态: " + p->state_str());
+        wait_for_enter();
         return;
     }
     if (pm.block_process(pid)) {
-        cout << "  -> 进程 " << p->name << "(PID=" << pid << ") 已阻塞。" << endl;
+        out_success("进程 " + p->name + "(PID=" + to_string(pid) + ") 已阻塞。");
     }
+    update_time_display();
+    wait_for_enter();
 }
 
 void do_wake_process() {
-    int pid = read_int("  输入要唤醒的进程PID: ");
+    clear_output_area();
+    int pid = read_int_tui("输入要唤醒的进程PID: ");
     PCB* p = pm.get_process(pid);
-    if (!p) { cout << "  进程不存在。" << endl; return; }
+    if (!p) { out_error("进程不存在。"); wait_for_enter(); return; }
     if (p->state != BLOCKED) {
-        cout << "  只能唤醒阻塞的进程。当前状态: " << p->state_str() << endl;
+        out_warning("只能唤醒阻塞的进程。当前状态: " + p->state_str());
+        wait_for_enter();
         return;
     }
     if (pm.wake_process(pid)) {
-        cout << "  -> 进程 " << p->name << "(PID=" << pid << ") 已唤醒到就绪队列。" << endl;
+        out_success("进程 " + p->name + "(PID=" + to_string(pid) + ") 已唤醒到就绪队列。");
     }
+    update_time_display();
+    wait_for_enter();
 }
 
 void do_run_schedule() {
-    cout << "\n  选择调度算法:" << endl;
-    cout << "  1. 先来先服务(FCFS)" << endl;
-    cout << "  2. 时间片轮转(RR)" << endl;
-    int choice = read_int("  选择: ");
+    clear_output_area();
+    out_info("选择调度算法");
+    out_println("  " + color::GREEN + "1" + color::RESET + ". " + color::WHITE + "先来先服务(FCFS)" + color::RESET);
+    out_println("  " + color::YELLOW + "2" + color::RESET + ". " + color::WHITE + "时间片轮转(RR)" + color::RESET);
+
+    int choice = read_int_tui("选择: ");
     if (choice == 1) {
         scheduler.set_algorithm(FCFS);
+        out_info("使用 FCFS 调度算法");
     } else if (choice == 2) {
-        int slice = read_int("  输入时间片大小(默认2): ");
+        int slice = read_int_tui("输入时间片大小(默认2): ");
         if (slice <= 0) slice = 2;
         scheduler.set_time_slice(slice);
         scheduler.set_algorithm(RR);
+        out_info("使用 RR 调度算法，时间片=" + to_string(slice));
     } else {
-        cout << "  无效选择。" << endl;
+        out_error("无效选择。");
+        wait_for_enter();
         return;
     }
 
     display_ready_queue();
-    cout << endl;
+    spinner("调度执行中...", 300);
     scheduler.run_all();
+    update_time_display();
+    wait_for_enter();
 }
 
 void demo_producer_consumer() {
-    cout << "\n===== 生产者-消费者同步演示 =====" << endl;
-    cout << "  说明: 缓冲区大小为3，生产者生产5个产品，消费者消费5个产品\n" << endl;
+    clear_output_area();
+    out_info("生产者-消费者同步演示");
+    out_info("缓冲区大小: 3，生产者生产5个产品，消费者消费5个产品");
 
     Semaphore mutex(1, "mutex");
     Semaphore empty_s(3, "empty");
@@ -164,16 +188,16 @@ void demo_producer_consumer() {
     int produced = 0, consumed = 0;
 
     for (int i = 0; i < 10; i++) {
-        cout << "\n--- 时间 " << pm.get_current_time() << " ---" << endl;
+        out_println(color::CYAN + "── 时间 " + to_string(pm.get_current_time()) + " ──" + color::RESET);
 
         if (producer->state == READY && produced < 5) {
-            cout << "  生产者尝试生产..." << endl;
+            out_info("生产者尝试生产...");
             if (empty_s.P(producer)) {
                 if (mutex.P(producer)) {
                     buffer++;
                     produced++;
-                    cout << "  生产者生产了产品 " << produced
-                         << "，缓冲区: " << buffer << "/3" << endl;
+                    out_println("    " + color::GREEN + icon::SPARKLE + " 生产者生产了产品 " + to_string(produced)
+                               + "，缓冲区: " + color::YELLOW + to_string(buffer) + "/3" + color::RESET);
                     mutex.V();
                     full_s.V();
                 }
@@ -181,13 +205,13 @@ void demo_producer_consumer() {
         }
 
         if (consumer->state == READY && consumed < 5) {
-            cout << "  消费者尝试消费..." << endl;
+            out_info("消费者尝试消费...");
             if (full_s.P(consumer)) {
                 if (mutex.P(consumer)) {
                     buffer--;
                     consumed++;
-                    cout << "  消费者消费了产品 " << consumed
-                         << "，缓冲区: " << buffer << "/3" << endl;
+                    out_println("    " + color::MAGENTA + icon::SPARKLE + " 消费者消费了产品 " + to_string(consumed)
+                               + "，缓冲区: " + color::YELLOW + to_string(buffer) + "/3" + color::RESET);
                     mutex.V();
                     empty_s.V();
                 }
@@ -195,140 +219,142 @@ void demo_producer_consumer() {
         }
 
         pm.advance_time(1);
-
         if (produced >= 5 && consumed >= 5) break;
     }
 
     pm.terminate_process(producer->pid);
     pm.terminate_process(consumer->pid);
-    cout << "\n===== 演示结束 =====\n" << endl;
+    out_success("演示完成！");
+    update_time_display();
+    wait_for_enter();
 }
 
 void demo_message_comm() {
-    cout << "\n===== 进程通信演示(消息队列) =====" << endl;
-    cout << "  说明: 两个进程通过消息队列交换信息\n" << endl;
+    clear_output_area();
+    out_info("进程通信演示 - 消息队列");
+    out_info("两个进程通过消息队列交换信息");
 
     PCB* sender = pm.create_process("发送者", 4, 5);
     PCB* receiver = pm.create_process("接收者", 4, 5);
 
     vector<string> messages = {"Hello", "你好", "操作系统", "消息传递"};
 
-    cout << "\n--- 发送阶段 ---" << endl;
+    out_println(color::CYAN + "── 发送阶段 ──" + color::RESET);
     for (size_t i = 0; i < messages.size(); i++) {
         mq.send(sender->pid, receiver->pid, messages[i], pm.get_current_time());
-        cout << "  [时间 " << pm.get_current_time() << "] "
-             << sender->name << " -> " << receiver->name
-             << ": \"" << messages[i] << "\"" << endl;
+        out_println("  " + color::GRAY + "[时间 " + to_string(pm.get_current_time()) + "]"
+                   + color::RESET + " " + color::GREEN + sender->name + color::RESET
+                   + " " + icon::ARROW + " " + color::YELLOW + receiver->name + color::RESET
+                   + ": " + color::CYAN + "\"" + messages[i] + "\"" + color::RESET);
         pm.advance_time(1);
     }
 
-    cout << "\n--- 接收阶段 ---" << endl;
+    out_println(color::CYAN + "── 接收阶段 ──" + color::RESET);
     while (mq.has_message(receiver->pid)) {
         Message msg;
         if (mq.recv(receiver->pid, msg)) {
-            cout << "  [时间 " << pm.get_current_time() << "] "
-                 << receiver->name << " 收到来自 " << sender->name
-                 << ": \"" << msg.content << "\" (发送于时间" << msg.timestamp << ")" << endl;
+            out_println("  " + color::GRAY + "[时间 " + to_string(pm.get_current_time()) + "]"
+                       + color::RESET + " " + color::YELLOW + receiver->name + color::RESET
+                       + " 收到来自 " + color::GREEN + sender->name + color::RESET
+                       + ": " + color::CYAN + "\"" + msg.content + "\""
+                       + color::RESET + color::GRAY + " (发送于时间" + to_string(msg.timestamp) + ")" + color::RESET);
         }
         pm.advance_time(1);
     }
 
     pm.terminate_process(sender->pid);
     pm.terminate_process(receiver->pid);
-    cout << "\n===== 演示结束 =====\n" << endl;
+    out_success("演示完成！");
+    update_time_display();
+    wait_for_enter();
 }
 
 void do_communication() {
-    cout << "\n  进程通信:" << endl;
-    cout << "  1. 手动发送消息" << endl;
-    cout << "  2. 手动接收消息" << endl;
-    cout << "  3. 查看进程消息" << endl;
-    cout << "  4. 运行通信演示" << endl;
-    int choice = read_int("  选择: ");
+    clear_output_area();
+    out_info("进程通信 - 消息队列");
+    out_println("  " + color::GREEN + "1" + color::RESET + ". " + color::WHITE + "手动发送消息" + color::RESET);
+    out_println("  " + color::YELLOW + "2" + color::RESET + ". " + color::WHITE + "手动接收消息" + color::RESET);
+    out_println("  " + color::CYAN + "3" + color::RESET + ". " + color::WHITE + "查看进程消息" + color::RESET);
+    out_println("  " + color::MAGENTA + "4" + color::RESET + ". " + color::WHITE + "运行通信演示" + color::RESET);
+
+    int choice = read_int_tui("选择: ");
 
     if (choice == 1) {
-        int from = read_int("  发送方PID: ");
-        int to = read_int("  接收方PID: ");
-        string msg = read_str("  消息内容: ");
+        int from = read_int_tui("发送方PID: ");
+        int to = read_int_tui("接收方PID: ");
+        string msg = read_str_tui("消息内容: ");
         if (pm.get_process(from) && pm.get_process(to)) {
             mq.send(from, to, msg, pm.get_current_time());
-            cout << "  -> 消息已发送。" << endl;
+            out_success("消息已发送。");
         } else {
-            cout << "  进程不存在。" << endl;
+            out_error("进程不存在。");
         }
     } else if (choice == 2) {
-        int pid = read_int("  接收方PID: ");
+        int pid = read_int_tui("接收方PID: ");
         Message msg;
         if (mq.recv(pid, msg)) {
-            cout << "  收到来自PID=" << msg.from_pid << " 的消息: \"" << msg.content
-                 << "\" (时间" << msg.timestamp << ")" << endl;
+            out_success("收到来自PID=" + to_string(msg.from_pid) + " 的消息: \"" + msg.content
+                       + "\" (时间" + to_string(msg.timestamp) + ")");
         } else {
-            cout << "  没有待接收的消息。" << endl;
+            out_warning("没有待接收的消息。");
         }
     } else if (choice == 3) {
-        int pid = read_int("  查看进程PID: ");
+        int pid = read_int_tui("查看进程PID: ");
         auto msgs = mq.peek_all(pid);
         if (msgs.empty()) {
-            cout << "  该进程没有待接收的消息。" << endl;
+            out_warning("该进程没有待接收的消息。");
         } else {
-            cout << "  待接收消息:" << endl;
+            out_info("待接收消息:");
             for (const auto& m : msgs) {
-                cout << "    来自PID=" << m.from_pid << ": \"" << m.content
-                     << "\" (时间" << m.timestamp << ")" << endl;
+                out_println("    " + color::GRAY + icon::BULLET + color::RESET
+                           + " 来自PID=" + color::GREEN + to_string(m.from_pid) + color::RESET
+                           + ": " + color::CYAN + "\"" + m.content + "\""
+                           + color::RESET + color::GRAY + " (时间" + to_string(m.timestamp) + ")" + color::RESET);
             }
         }
     } else if (choice == 4) {
         demo_message_comm();
+        return;
     }
+    update_time_display();
+    wait_for_enter();
 }
 
 void do_sync_demo() {
-    cout << "\n  进程同步:" << endl;
-    cout << "  1. 运行生产者-消费者演示" << endl;
-    cout << "  2. 手动P操作" << endl;
-    cout << "  3. 手动V操作" << endl;
-    int choice = read_int("  选择: ");
+    clear_output_area();
+    out_info("进程同步 - PV操作");
+    out_println("  " + color::GREEN + "1" + color::RESET + ". " + color::WHITE + "运行生产者-消费者演示" + color::RESET);
+    out_println("  " + color::YELLOW + "2" + color::RESET + ". " + color::WHITE + "手动P操作" + color::RESET);
+    out_println("  " + color::CYAN + "3" + color::RESET + ". " + color::WHITE + "手动V操作" + color::RESET);
+
+    int choice = read_int_tui("选择: ");
 
     if (choice == 1) {
         demo_producer_consumer();
+        return;
     } else if (choice == 2) {
-        int pid = read_int("  进程PID: ");
+        int pid = read_int_tui("进程PID: ");
         PCB* p = pm.get_process(pid);
-        if (!p) { cout << "  进程不存在。" << endl; return; }
+        if (!p) { out_error("进程不存在。"); wait_for_enter(); return; }
         static Semaphore sem(1, "manual");
         sem.P(p);
     } else if (choice == 3) {
         static Semaphore sem(1, "manual");
         sem.V();
     }
-}
-
-void display_menu() {
-    cout << "========================================" << endl;
-    cout << "        进程管理模拟系统" << endl;
-    cout << "========================================" << endl;
-    cout << "  1. 创建进程" << endl;
-    cout << "  2. 终止进程" << endl;
-    cout << "  3. 阻塞进程" << endl;
-    cout << "  4. 唤醒进程" << endl;
-    cout << "  5. 运行调度" << endl;
-    cout << "  6. 进程同步(PV操作)" << endl;
-    cout << "  7. 进程通信(消息队列)" << endl;
-    cout << "  8. 显示所有进程" << endl;
-    cout << "  0. 退出" << endl;
-    cout << "========================================" << endl;
+    update_time_display();
+    wait_for_enter();
 }
 
 int main() {
-#ifdef _WIN32
-    SetConsoleOutputCP(65001);
-#endif
-    cout << "欢迎使用进程管理模拟系统!" << endl;
-    cout << "当前系统时间: " << pm.get_current_time() << "\n" << endl;
+    init_console();
+    hide_cursor();
+
+    // 绘制完整界面
+    draw_full_screen();
 
     while (true) {
-        display_menu();
-        int choice = read_int("请选择操作: ");
+        int choice = read_int_tui("请选择操作: ");
 
         switch (choice) {
             case 1: do_create_process(); break;
@@ -339,16 +365,27 @@ int main() {
             case 6: do_sync_demo(); break;
             case 7: do_communication(); break;
             case 8:
+                clear_output_area();
                 display_processes();
                 display_ready_queue();
                 display_blocked_queue();
+                wait_for_enter();
                 break;
             case 0:
-                cout << "感谢使用，再见!" << endl;
+                clear_output_area();
+                out_println("");
+                out_println(color::CYAN + color::BOLD + "  感谢使用，再见!" + color::RESET);
+                show_cursor();
+                set_cursor(INPUT_ROW, 1);
                 return 0;
             default:
-                cout << "  无效选择，请重试。" << endl;
+                clear_output_area();
+                out_error("无效选择，请重试。");
+                wait_for_enter();
         }
+
+        // 返回主菜单时刷新时间显示
+        update_time_display();
     }
     return 0;
 }

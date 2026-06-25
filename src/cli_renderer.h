@@ -37,41 +37,36 @@ namespace icon {
 // Spinner frames
 const std::vector<std::string> SPINNER_FRAMES = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
 
-// ============ TUI 核心函数 ============
+// ============ 核心函数 ============
 
-void init_console();                    // 初始化控制台 (启用 VT100)
-void hide_cursor();                     // 隐藏光标
-void show_cursor();                     // 显示光标
+void init_console();
+void hide_cursor();
+void show_cursor();
+void clear_screen();
+void set_cursor(int row, int col);
 
-// 屏幕布局常量
-const int MENU_START_ROW = 1;          // 菜单起始行
-const int MENU_ROWS = 20;              // 菜单占用行数
-const int OUTPUT_START_ROW = 22;       // 输出区域起始行
-const int OUTPUT_ROWS = 20;            // 输出区域行数
-const int INPUT_ROW = 43;              // 输入行位置
+// 页面绘制
+void draw_main_menu(int current_time);     // 绘制主菜单
+void draw_page_header(const std::string& title);  // 绘制子页面标题
+void draw_page_footer();                    // 绘制子页面底部（按回车返回）
 
-// 全屏绘制
-void draw_full_screen();               // 绘制完整界面框架
-
-// 区域操作
-void clear_output_area();              // 清空输出区域
-void move_to_output();                 // 移动光标到输出区域
-void move_to_input();                  // 移动光标到输入区域
-void set_cursor(int row, int col);    // 设置光标位置
-
-// 输出函数 (自动在输出区域内显示)
-void out_print(const std::string& text);           // 普通输出
-void out_println(const std::string& text = "");    // 输出并换行
-void out_success(const std::string& msg);          // 成功消息
-void out_error(const std::string& msg);            // 错误消息
-void out_info(const std::string& msg);             // 信息消息
-void out_warning(const std::string& msg);          // 警告消息
+// 输出函数
+void println(const std::string& text = "");
+void print_success(const std::string& msg);
+void print_error(const std::string& msg);
+void print_info(const std::string& msg);
+void print_warning(const std::string& msg);
+void print_separator();
 
 // 进程显示
-std::string state_display(ProcessState state);     // 获取状态显示文本
-void out_process_table(const std::vector<PCB*>& processes);
-void out_queue(const std::string& name, const std::vector<PCB*>& queue, const std::string& color);
-void out_progress_bar(int current, int total, int width = 20);
+std::string state_display(ProcessState state);
+void print_process_table(const std::vector<PCB*>& processes);
+void print_queue(const std::string& name, const std::vector<PCB*>& queue, const std::string& color);
+
+// 输入函数
+int read_int(const std::string& prompt);
+std::string read_str(const std::string& prompt);
+void wait_enter();  // 等待按回车
 
 // 动画
 void spinner(const std::string& text, int duration_ms = 500);
@@ -79,8 +74,5 @@ void spinner(const std::string& text, int duration_ms = 500);
 // 辅助
 int display_width(const std::string& s);
 std::string pad_to_width(const std::string& s, int target_width);
-
-// 全局状态：当前输出行位置
-extern int g_output_row;
 
 } // namespace cli
